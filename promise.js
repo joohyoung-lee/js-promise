@@ -5,84 +5,64 @@ const STATE = {
 };
 
 class NewPromise {
+
     constructor(executor) {
         this.state = STATE.PENDING;
         this.value = undefined;
+        this.reason = undefined;
         this.handleFulfilled = [];
         this.handleRejected = [];
-        // const resolve = (value) => {
-        //     if (this.state !== STATE.PENDING) return;
-        //     this.state = STATE.FULFILLED;
-        //     this.value = value;
-        //     this.handleFulfilled.forEach(callback => callback());
-        // };
-        // const reject = (reason) => {
-        //     if (this.state !== STATE.PENDING) return;
-        //     this.state = STATE.REJECTED;
-        //     this.value = reason;
-        //     this.handleRejected.forEach(callback => callback());
-        // }
+        const resolve = (value) => {
+            if (this.state !== STATE.PENDING) return;
+            this.state = STATE.FULFILLED;
+            this.value = value;
+            this.handleFulfilled.forEach(callback => callback());
+        };
+        const reject = (reason) => {
+            if (this.state !== STATE.PENDING) return;
+            this.state = STATE.REJECTED;
+            this.reason = reason;
+            this.handleRejected.forEach(callback => callback());
+        }
         try {
-            executor(this.resolve.bind(this), this.reject.bind(this));
+            executor(resolve, reject);
         } catch (error) {
-            this.reject(error);
+            reject(error);
         }
     }
 
-    resolve(value) {
-        if (this.state !== STATE.PENDING) return;
-        this.state = STATE.FULFILLED;
-        this.value = value;
-        this.handleFulfilled.forEach(callback => callback());
-    }
-
-    reject(reason) {
-        if (this.state !== STATE.PENDING) return;
-        this.state = STATE.REJECTED;
-        this.value = reason;
-        this.handleRejected.forEach(callback => callback());
-    }
-
     then(onFulfilled, onRejected) {
-        let newPromise = new NewPromise((resolve, reject) => {
-            if (this.status === STATE.FULFILLED) {
-                // setTimeout(() => {
+        const newPromise = new NewPromise((resolve, reject) => {
+            if (this.state === STATE.FULFILLED) {
+                try {
+                    let result = onFulfilled(this.value);
+                    this.resolveNewPromise(newPromise, result, resolve, reject);
+                } catch (error) {
+                    reject(error);
+                }
+            } else if (this.state === STATE.REJECTED) {
+                try {
+                    let result = onRejected(this.reason);
+                    this.resolveNewPromise(newPromise, result, resolve, reject);
+                } catch (error) {
+                    reject(error);
+                }
+            } else if (this.state === STATE.PENDING) {
+                this.handleFulfilled.push(() => {
                     try {
                         let result = onFulfilled(this.value);
-                        resolveNewPromise(newPromise, result, resolve, reject);
+                        this.resolveNewPromise(newPromise, result, resolve, reject);
                     } catch (error) {
                         reject(error);
                     }
-                // });
-            } else if (this.status === STATE.REJECTED) {
-                // setTimeout(() => {
-                    try {
-                        let result = onRejected(this.value);
-                        resolveNewPromise(newPromise, result, resolve, reject);
-                    } catch (error) {
-                        reject(error);
-                    }
-                // });
-            } else if (this.status === STATE.PENDING) {
-                this.handleFulfilled.push(() => {
-                    // setTimeout(() => {
-                        try {
-                            let result = onFulfilled(this.value);
-                            resolveNewPromise(newPromise, result, resolve, reject);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    // });
                 });
                 this.handleRejected.push(() => {
-                    // setTimeout(() => {
-                        try {
-                            let result = onRejected(this.value);
-                            resolveNewPromise(newPromise, result, resolve, reject);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    // });
+                    try {
+                        let result = onRejected(this.reason);
+                        this.resolveNewPromise(newPromise, result, resolve, reject);
+                    } catch (error) {
+                        reject(error);
+                    }
                 });
             }
         });
@@ -90,15 +70,36 @@ class NewPromise {
     }
 
     resolveNewPromise(promise, value, resolved, rejected) {
-        try {
-            if (value instanceof NewPromise) {
-                value.then(resolved, rejected);
-            } else {
-                resolved(value);
-            }   
-        } catch (error) {
-            rejected(error);
-        }
+        if (value instanceof NewPromise) {
+            value.then((data) => {
+                this.resolveNewPromise(promise, data, resolved, rejected);
+            }, (error) => {
+                rejected(error);
+            });
+        } else if (value != null && (typeof value === 'object' || typeof value === 'function')) {
+            let isCalled = false;
+            try {
+                if (typeof value.then === 'function') {
+                    value.then(value, (res) => {
+                        if (isCalled) return;
+                        isCalled = true;
+                        this.resolveNewPromise(promise, res, resolved, rejected);
+                    }, (rej) => {
+                        if (isCalled) return;
+                        isCalled = true;
+                        rejected(rej);
+                    });
+                } else {
+                    resolved(value);
+                }
+            } catch (error) {
+                if (isCalled) return;
+                isCalled = true;
+                rejected(error);
+            }
+        } else {
+            resolved(value);
+        }   
     }
 
     catch(onRejected) {
@@ -118,7 +119,7 @@ class NewPromise {
     }
 }
 
-NewPromise.prototype.all = (iterable) => {
+NewPromise.all = (iterable) => {
     return new NewPromise((resolve, reject) => {
         const result = [];
         let index = 0;
@@ -134,9 +135,9 @@ NewPromise.prototype.all = (iterable) => {
             });
         }
     });
-}
+};
 
-NewPromise.prototype.resolve = (value) => {
+NewPromise.resolve = (value) => {
     if (value instanceof NewPromise) {
         return value;
     }
@@ -147,15 +148,15 @@ NewPromise.prototype.resolve = (value) => {
     return new NewPromise((resolve) => {
         resolve(value);
     });
-}
+};
 
-NewPromise.prototype.reject = (reason) => {
+NewPromise.reject = (reason) => {
     if (reason instanceof NewPromise) {
         return reason;
     }
     return new NewPromise((resolve, reject) => {
         reject(reason);
     });
-}
+};
 
 export default NewPromise;
